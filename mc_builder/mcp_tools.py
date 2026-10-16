@@ -11,6 +11,7 @@ from pydantic import Field, StrictBool
 
 from .builds import assistant_planning, summary
 from .model import BuildSpec
+from .catalog import BLOCKS, VERSION, catalog_page
 
 
 def origin_url(value):
@@ -26,7 +27,7 @@ def origin_url(value):
 def create_mcp(store, public_base_url=''):
     base_url = origin_url(public_base_url)
     server = MCPServer(
-        'Blockwright', version='0.2.0',
+        'Blockwright', version='0.3.0',
         instructions=(
             'You are the architect. Interpret the user building request into supported parameters and call '
             'create_build. First use get_building_capabilities if unsure. Geometry uses curated templates, '
@@ -47,7 +48,9 @@ def create_mcp(store, public_base_url=''):
             'seed': '0..2147483647; varies foundation materials, not the layout.',
             'features': ['foundations', 'windows', 'stairs', 'doors', 'basic furnishings', 'optional landscape'],
             'exports': ['Sponge v2 .schem', 'Litematica v6 .litematic', 'JSON'],
-            'minecraft_version': 'Java 1.20.1', 'model_api_required': False,
+            'minecraft_version': f'Java {VERSION}', 'model_api_required': False,
+            'block_catalog_count': len(BLOCKS),
+            'materials': 'Use search_blocks to discover vanilla IDs and properties. create_build accepts palette roles wall, beam, floor, roof, stair. edit_build places/removes blocks or replaces a material; coordinates match the preview JSON, 0..127.',
             'unsupported': ['arbitrary floor plans', 'reference images', 'vision critique', 'automatic refinement'],
         }
 
@@ -61,10 +64,11 @@ def create_mcp(store, public_base_url=''):
         terrain: StrictBool = True,
         seed: Annotated[int, Field(ge=0, le=2147483647, strict=True)] = 42,
         title: Annotated[str, Field(min_length=1, max_length=100, strict=True)] = 'Assistant-designed building',
+        palette: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Generate Minecraft blocks from your architectural design; return a 3D preview and real schematic downloads. No model API is called. This creates an in-memory build and does not edit a Minecraft world."""
         spec = BuildSpec.from_dict(dict(style=style, width=width, depth=depth, floors=floors,
-                                        tower=tower, terrain=terrain, seed=seed, title=title))
+                                        tower=tower, terrain=terrain, seed=seed, title=title, palette=palette or {}))
         payload = await to_thread.run_sync(store.create, spec, assistant_planning())
         return summary(payload, base_url)
 
@@ -75,6 +79,18 @@ def create_mcp(store, public_base_url=''):
         if build is None:
             raise ToolError('Build expired or unknown. Call create_build again.')
         return summary(build[2], base_url)
+
+    @server.tool(annotations=read_only, structured_output=True)
+    def search_blocks(query: str = '', offset: int = 0, limit: int = 40) -> dict[str, Any]:
+        """Search all vanilla block IDs and valid state properties for the pinned Java release. Paginated, max 100 per call."""
+        return catalog_page(query, offset, limit)
+
+    @server.tool(structured_output=True, annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False))
+    async def edit_build(build_id: str, changes: list[dict[str, Any]] | None = None,
+                         replace: dict[str, str] | None = None) -> dict[str, Any]:
+        """Create an edited copy. Supply changes [{x,y,z,block}] (air deletes, max 256) or replace {from,to} to replace every occurrence of a block ID, preserving compatible properties. Old build stays unchanged. Doors, beds and tall plants place in pairs. Use preview JSON coordinates, integers 0..127. No world/game connection or model API."""
+        payload = await to_thread.run_sync(store.edit, build_id, changes, replace)
+        return summary(payload, base_url)
 
     return server
 

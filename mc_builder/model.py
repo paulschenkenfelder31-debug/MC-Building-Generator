@@ -1,9 +1,8 @@
 from collections import Counter
-from dataclasses import asdict, dataclass
-import re
+from dataclasses import asdict, dataclass, field
+from .catalog import AIR, BLOCKS, VERSION, DATA_VERSION, canonical_state, split_state, format_state
 
 
-DATA_VERSION = 3465  # Java Edition 1.20.1; all generated blocks exist in this version.
 STYLES = ('medieval', 'modern', 'japanese')
 
 
@@ -17,6 +16,7 @@ class BuildSpec:
     terrain: bool = True
     seed: int = 42
     title: str = 'Timber & stone manor'
+    palette: dict = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, values):
@@ -35,6 +35,9 @@ class BuildSpec:
                 raise ValueError(f'{key} must be true or false.')
         if not isinstance(data['title'], str) or not 1 <= len(data['title']) <= 100:
             raise ValueError('Title must contain 1–100 characters.')
+        if not isinstance(data['palette'], dict) or set(data['palette']) - {'wall', 'beam', 'floor', 'roof', 'stair'}:
+            raise ValueError('Palette roles: wall, beam, floor, roof, stair.')
+        data['palette'] = {key: canonical_state(value) for key, value in data['palette'].items()}
         data['tower'] = data['tower'] and data['width'] >= 25 and data['style'] == 'medieval'
         return cls(**data)
 
@@ -52,7 +55,11 @@ class World:
 
     def set(self, x, y, z, block):
         pos = (int(x), int(y), int(z))
-        if block == 'air' or block == 'minecraft:air':
+        try:
+            block = canonical_state(block)
+        except ValueError:
+            pass
+        if block in AIR or block == 'air':
             self.blocks.pop(pos, None)
         else:
             self.blocks[pos] = block if block.startswith('minecraft:') else state(block)
@@ -85,47 +92,27 @@ class World:
         }
 
 
-# The generator owns this small, versioned palette rather than trusting model block IDs.
-SOLIDS = {
-    'grass_block', 'dirt', 'stone', 'stone_bricks', 'mossy_stone_bricks', 'cobblestone',
-    'spruce_planks', 'spruce_log', 'stripped_spruce_log', 'white_terracotta',
-    'deepslate_tiles', 'glass', 'crafting_table', 'bookshelf', 'oak_leaves',
-    'white_concrete', 'gray_concrete', 'smooth_quartz', 'oak_planks', 'oak_log',
-    'dark_oak_planks', 'dark_oak_log', 'red_terracotta', 'polished_blackstone_bricks',
-}
-STAIRS = {'spruce_stairs', 'deepslate_tile_stairs', 'dark_oak_stairs', 'polished_blackstone_brick_stairs', 'quartz_stairs', 'stone_brick_stairs'}
-
-
 def validate(world):
     errors = []
     for (x, y, z), block in world.blocks.items():
-        match = re.fullmatch(r'minecraft:([a-z_]+)(?:\[([^\]]+)\])?', block)
-        if not match:
-            errors.append(f'Invalid state: {block}')
+        try:
+            canonical = canonical_state(block)
+            name, props = split_state(canonical)
+        except ValueError as error:
+            errors.append(str(error))
             continue
-        name, raw = match.groups()
-        props = dict(p.split('=', 1) for p in raw.split(',')) if raw else {}
-        allowed = {}
-        if name in STAIRS:
-            allowed = {'facing': {'north', 'south', 'east', 'west'}, 'half': {'bottom', 'top'}, 'shape': {'straight'}, 'waterlogged': {'false'}}
-        elif name == 'spruce_door':
-            allowed = {'facing': {'north'}, 'half': {'lower', 'upper'}, 'hinge': {'left'}, 'open': {'false'}, 'powered': {'false'}}
-            other_y = y + (1 if props.get('half') == 'lower' else -1)
-            other = world.blocks.get((x, other_y, z), '')
-            expected = block.replace('half=lower', 'half=upper') if props.get('half') == 'lower' else block.replace('half=upper', 'half=lower')
-            if other != expected:
+        if name.endswith('_door') and not name.endswith('_trapdoor'):
+            other_y = y + (1 if props['half'] == 'lower' else -1)
+            expected = format_state(name, props | {'half': 'upper' if props['half'] == 'lower' else 'lower'})
+            other = world.blocks.get((x, other_y, z), 'air')
+            try:
+                matches = canonical_state(other) == expected
+            except ValueError:
+                matches = False
+            if not matches:
                 errors.append(f'Door pair missing at {x},{y},{z}')
-        elif name in ('spruce_log', 'stripped_spruce_log', 'dark_oak_log', 'oak_log'):
-            allowed = {'axis': {'x', 'y', 'z'}}
-        elif name == 'oak_leaves':
-            allowed = {'persistent': {'true'}, 'distance': {'1'}}
-        elif name not in SOLIDS:
-            errors.append(f'Block outside supported palette: {name}')
-        if set(props) != set(allowed) or any(v not in allowed.get(k, set()) for k, v in props.items()):
-            errors.append(f'Unsupported block properties: {block}')
     return {
-        'passed': not errors,
-        'errors': errors[:30],
-        'checks': ['Java 1.20.1 palette', 'Generated block-state properties', 'Two-block door pairs'],
-        'limitations': ['Does not simulate Minecraft lighting, navigation, or neighbor updates.'],
+        'passed': not errors, 'errors': errors[:30],
+        'checks': [f'Java {VERSION}: full {len(BLOCKS):,}-block registry', 'Block-state properties', 'Two-block door pairs'],
+        'limitations': ['Does not simulate lighting, navigation, gravity, or neighbor updates. Block-entity inventories and text are not exported.'],
     }

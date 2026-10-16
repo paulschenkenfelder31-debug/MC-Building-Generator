@@ -6,6 +6,8 @@ The offline planner selects and parameterizes curated medieval, modern, and Japa
 
 **No model API key?** Connect ChatGPT or Codex through the built-in MCP endpoint. Your assistant plans in chat, calls `create_build`, and returns preview and download links. See [MCP connection instructions](docs/mcp.md).
 
+**Block library:** all 1,286 Java 26.3 block IDs are searchable and editable, with valid property selectors, custom building materials, placement, replacement and undo. Original Mojang textures/models are fetched during setup or deployment. See [blocks, textures and the Render update](docs/blocks-and-textures.md).
+
 ## Run locally
 
 Requires **Python 3.12+** and **Node.js 22.12+** (tested on Python 3.12 and Node 24).
@@ -16,6 +18,9 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 npm ci --cache /tmp/mc-building-npm-cache
 npm run build
+# Original artwork (requires access to Mojang downloads):
+.venv/bin/python -m pip install -r requirements-assets.txt
+.venv/bin/python scripts/prepare_minecraft_assets.py
 npm start
 ```
 
@@ -51,7 +56,7 @@ Building footprints are **15–65 blocks per side**, with **1–3 main floors**.
 
 ## Load into Minecraft Java Edition
 
-Both formats target **Java 1.20.1** (`DataVersion 3465`) using blocks available in that version. Newer compatible WorldEdit/Litematica versions should migrate these blocks; older versions and Bedrock are not supported.
+Both formats target **Java 26.3** (`DataVersion 5023`) using blocks available in that version. Newer compatible WorldEdit/Litematica versions should migrate these blocks; older versions and Bedrock are not supported.
 
 - **WorldEdit / FAWE:** put the `.schem` file in your installation's `schematics` directory, use `//schem load building-42`, then `//paste`. The export origin is the minimum X/Y/Z corner of the complete site, not the entrance.
 - **Litematica:** put the `.litematic` file in your Minecraft instance's `schematics` directory, load it in Litematica, and create a placement. Its material list can guide survival building.
@@ -77,6 +82,7 @@ The server sends the description to `https://api.openai.com/v1/chat/completions`
 .venv/bin/python -m pip install -r requirements-dev.txt
 .venv/bin/python -m unittest discover -s tests -v
 npm run build
+node --test tests/block-models.test.mjs
 ```
 
 `litemapy` is a pinned prerelease used only as an independent format reader in tests. Browser tests require a started Python server and Chromium:
@@ -86,13 +92,15 @@ npm run build
 .venv/bin/python tests/browser_smoke.py http://127.0.0.1:3000
 # Or use an existing Chromium installation:
 CHROMIUM_PATH=/usr/bin/chromium .venv/bin/python tests/browser_smoke.py http://127.0.0.1:3000
+# Test the texture pipeline without a Mojang download (synthetic fixtures only):
+CHROMIUM_PATH=/usr/bin/chromium .venv/bin/python tests/browser_texture_fixture.py
 ```
 
 The browser smoke test exercises WebGL rendering, floor cutaways, camera controls, exports, screenshots, style changes, terrain toggling, invalid input, and the mobile layout. Artifacts are written to the ignored `artifacts/` directory.
 
 ## What this first version does not do
 
-Reference-image interpretation, retrieval from example builds, arbitrary floor plans, bridges/ravines, automatic vision critique, iterative refinement, realistic Minecraft textures, and professional-builder quality are future work. The renderer uses simplified block geometry and colors; it is not the Minecraft rendering engine. Validation covers the generated palette, explicit block-state properties, and door pairs, not a full physics, lighting, or navigation simulation.
+Reference-image interpretation, retrieval from example builds, arbitrary floor plans, bridges/ravines, automatic vision critique, iterative refinement, professional-builder quality are future work. The preview uses original vanilla textures/models when installed and color placeholders otherwise. Engine-rendered blocks use approximate shapes and animations show their first frame. Validation covers the complete pinned registry, block-state properties and door pairs; it does not simulate physics, lighting or navigation.
 
 The server is a local development tool. Generated builds live in memory; restarting clears them, and only the latest eight builds remain downloadable. Download files you want to keep. Multi-user authentication, durable jobs, request quotas, and deployment hardening are not implemented.
 

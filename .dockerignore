@@ -3,6 +3,7 @@
 node_modules
 dist
 artifacts
+minecraft-assets
 __pycache__
 **/__pycache__
 *.pyc

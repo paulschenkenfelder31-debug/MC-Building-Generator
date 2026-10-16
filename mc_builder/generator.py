@@ -3,6 +3,7 @@ import math
 import random
 
 from .model import state, World
+from .catalog import BLOCKS, canonical_state, split_state, format_state
 
 
 PALETTES = {
@@ -13,11 +14,17 @@ PALETTES = {
 
 
 def stair(name, facing):
-    return state(name, facing=facing, half='bottom', shape='straight', waterlogged='false')
+    block, props = split_state(canonical_state(name))
+    values = dict(facing=facing, half='bottom', shape='straight', waterlogged='false')
+    props.update({k: v for k, v in values.items() if v in BLOCKS[block]['properties'].get(k, [])})
+    return format_state(block, props)
 
 
 def beam(name, axis='y'):
-    return state(name, axis=axis) if name.endswith('_log') else name
+    block, props = split_state(canonical_state(name))
+    if 'axis' in props:
+        props['axis'] = axis
+    return format_state(block, props)
 
 
 def foundation(world, x, z, width, depth, rng):
@@ -147,7 +154,7 @@ def tree(world, x, z, height):
 def generate(spec):
     world = World()
     rng = random.Random(spec.seed)
-    palette = PALETTES[spec.style]
+    palette = PALETTES[spec.style] | spec.palette
     x, z = 6, 6
     w, d = spec.width, spec.depth
     if spec.terrain:

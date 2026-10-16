@@ -118,7 +118,7 @@ class ExportTests(unittest.TestCase):
     def test_independent_sponge_reader(self):
         world = generate(BuildSpec())
         region, version = Region.from_sponge_nbt(read_nbt(schematic(world, 'Independent reader')))
-        self.assertEqual(version, 3465)
+        self.assertEqual(version, 5023)
         dimensions, blocks = world.normalized()
         self.assertEqual((region.width, region.height, region.length), dimensions)
         for pos, block in blocks.items():
@@ -156,7 +156,7 @@ class ExportTests(unittest.TestCase):
         world = generate(BuildSpec())
         root = read_nbt(litematic(world, 'Round-trip test'))
         self.assertEqual(root['Version'], 6)
-        self.assertEqual(root['MinecraftDataVersion'], 3465)
+        self.assertEqual(root['MinecraftDataVersion'], 5023)
         region = root['Regions']['Building']
         dimensions, expected = world.normalized()
         palette = []

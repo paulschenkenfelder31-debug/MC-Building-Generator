@@ -8,6 +8,18 @@ COPY index.html vite.config.js ./
 COPY web ./web
 RUN npm run build
 
+FROM python:3.12-slim-bookworm AS minecraft
+WORKDIR /assets-build
+COPY requirements-assets.txt ./
+RUN --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/build_ca ]; then export PIP_CERT=/run/secrets/build_ca; fi; \
+    pip install --no-cache-dir -r requirements-assets.txt
+COPY scripts/prepare_minecraft_assets.py ./scripts/
+COPY mc_builder/data/catalog.json ./mc_builder/data/
+RUN --mount=type=secret,id=build_ca \
+    if [ -f /run/secrets/build_ca ]; then export SSL_CERT_FILE=/run/secrets/build_ca; fi; \
+    python scripts/prepare_minecraft_assets.py
+
 FROM python:3.12-slim-bookworm
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
@@ -20,6 +32,7 @@ RUN --mount=type=secret,id=build_ca \
     && useradd --create-home --uid 10001 app
 COPY --chown=app:app mc_builder ./mc_builder
 COPY --from=frontend --chown=app:app /build/dist ./dist
+COPY --from=minecraft --chown=app:app /assets-build/minecraft-assets ./minecraft-assets
 USER app
 EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \

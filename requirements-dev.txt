@@ -1,4 +1,5 @@
 -r requirements.txt
+-r requirements-assets.txt
 litemapy==0.11.0b0
 typing_extensions==4.16.0
 playwright==1.62.0

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { BlockModels, FACE_DATA } from './block-models.js';
 
 const COLORS = {
   grass_block: '#799665', dirt: '#8b7254', stone: '#92988e', stone_bricks: '#969b91', mossy_stone_bricks: '#7a8768', cobblestone: '#858e80',
@@ -8,14 +9,6 @@ const COLORS = {
   white_concrete: '#e9e7dc', gray_concrete: '#64696a', smooth_quartz: '#ece8da', quartz_stairs: '#ece8da', oak_planks: '#c8aa73', dark_oak_planks: '#6c4a33',
   dark_oak_log: '#463526', dark_oak_stairs: '#6c4a33', red_terracotta: '#ac5c45', polished_blackstone_bricks: '#454751', polished_blackstone_brick_stairs: '#454751', stone_brick_stairs: '#969b91',
 };
-const FACES = [
-  { n: [1,0,0], v: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },
-  { n: [-1,0,0], v: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },
-  { n: [0,1,0], v: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },
-  { n: [0,-1,0], v: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },
-  { n: [0,0,1], v: [[1,0,1],[1,1,1],[0,1,1],[0,0,1]] },
-  { n: [0,0,-1], v: [[0,0,0],[0,1,0],[1,1,0],[1,0,0]] },
-];
 
 export class Preview {
   constructor(container) {
@@ -38,6 +31,21 @@ export class Preview {
     this.group = new THREE.Group(); this.scene.add(this.group);
     this.resize = new ResizeObserver(() => { const w = container.clientWidth, h = container.clientHeight; this.renderer.setSize(w, h); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); });
     this.resize.observe(container);
+    const canvas = this.renderer.domElement;
+    canvas.addEventListener('pointerdown', e => { this.pointerStart = [e.clientX, e.clientY]; });
+    canvas.addEventListener('pointerup', e => {
+      if (!this.onPick || !this.data || !this.pointerStart || Math.hypot(e.clientX-this.pointerStart[0], e.clientY-this.pointerStart[1]) > 4 || e.button !== 0) return;
+      const rect = canvas.getBoundingClientRect(), ray = new THREE.Raycaster();
+      ray.setFromCamera(new THREE.Vector2((e.clientX-rect.left)/rect.width*2-1, -(e.clientY-rect.top)/rect.height*2+1), this.camera);
+      const hit = ray.intersectObjects(this.group.children)[0];
+      if (hit) {
+        const coords = hit.object.geometry.getAttribute('blockPosition');
+        const i = hit.face.a;
+        const normal = hit.face.normal.toArray();
+        const strongest = normal.map(Math.abs).indexOf(Math.max(...normal.map(Math.abs)));
+        this.onPick([coords.getX(i), coords.getY(i), coords.getZ(i)], normal.map((n, axis) => axis === strongest ? Math.sign(n) : 0));
+      }
+    });
     this.renderer.setAnimationLoop(() => { this.controls.update(); this.renderer.render(this.scene, this.camera); });
   }
 
@@ -47,50 +55,59 @@ export class Preview {
     this.data = data; this.setLayer(data.dimensions[1] - 1); this.setView('iso');
   }
 
+  async enableTextures(library) {
+    const atlas = await new THREE.TextureLoader().loadAsync('/minecraft-assets/atlas.png');
+    atlas.colorSpace = THREE.SRGBColorSpace; atlas.magFilter = THREE.NearestFilter;
+    atlas.minFilter = THREE.NearestFilter; atlas.generateMipmaps = false;
+    this.atlas = atlas; this.models = new BlockModels(library);
+    if (this.data) this.setLayer(this.layer);
+  }
+
   setLayer(layer) {
+    this.layer = layer;
     while (this.group.children.length) { const mesh = this.group.children[0]; this.group.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
     const { blocks, palette, dimensions } = this.data;
     const visible = new Map(blocks.filter(b => b[1] <= layer).map(b => [`${b[0]},${b[1]},${b[2]}`, b[3]]));
-    const opaque = { p: [], n: [], c: [] }, glass = { p: [], n: [], c: [] };
+    const bucket = () => ({ p: [], n: [], c: [], uv: [], pos: [] });
+    const buckets = { textured: bucket(), transparent: bucket(), plain: bucket() };
+    const isTransparent = block => /glass|water(?:\[|$)|ice(?:\[|$)|slime_block|honey_block/.test(block);
+    const facesById = palette.map(block => this.models?.faces(block) || FACE_DATA.map(([,n,v]) => ({ n, v, cull:n, textured:false })));
+    const full = facesById.map((faces, id) => !/leaves|glass|water|ice|slime|honey|air|barrier|light(?:\[|$)/.test(palette[id]) && faces.length === 6 && faces.every(face => face.v.every(v => v.every(n => n === 0 || n === 1))));
     const colors = palette.map(b => new THREE.Color(this.colorFor(b)));
-    const fullBlock = b => b && !b.includes('_stairs') && !b.includes('_door') && !b.includes('glass');
-    const addBox = (target, x, y, z, id, min = [0,0,0], max = [1,1,1], cull = true) => {
-      const color = colors[id].clone();
-      const variation = 1 - ((x * 17 + z * 31 + y * 13) % 7) * .009;
-      color.multiplyScalar(variation);
-      for (const { n, v } of FACES) {
-        const neighborId = visible.get(`${x+n[0]},${y+n[1]},${z+n[2]}`);
-        const neighbor = neighborId === undefined ? '' : palette[neighborId];
-        if (cull && (fullBlock(neighbor) || (palette[id].includes('glass') && neighbor.includes('glass')))) continue;
-        for (const index of [0,1,2,0,2,3]) {
-          const vertex = v[index];
-          target.p.push(x + min[0] + vertex[0]*(max[0]-min[0]) - dimensions[0]/2, y + min[1] + vertex[1]*(max[1]-min[1]), z + min[2] + vertex[2]*(max[2]-min[2]) - dimensions[2]/2);
-          target.n.push(...n); target.c.push(color.r, color.g, color.b);
-        }
-      }
-    };
     for (const [x,y,z,id] of blocks) {
       if (y > layer) continue;
-      const block = palette[id]; const target = block.includes('glass') ? glass : opaque;
-      if (block.includes('_stairs')) {
-        addBox(target, x,y,z,id, [0,0,0], [1,.5,1], false);
-        const facing = /facing=(\w+)/.exec(block)?.[1];
-        const min = [0,.5,0], max = [1,1,1];
-        if (facing === 'east') min[0] = .5;
-        if (facing === 'west') max[0] = .5;
-        if (facing === 'south') min[2] = .5;
-        if (facing === 'north') max[2] = .5;
-        addBox(target,x,y,z,id,min,max,false);
-      } else if (block.includes('_door')) addBox(target,x,y,z,id,[0,0,0],[1,1,.1875],false);
-      else addBox(target,x,y,z,id);
+      const block = palette[id];
+      for (const face of facesById[id]) {
+        if (face.cull) {
+          const n = face.cull;
+          const neighborId = visible.get(`${x+n[0]},${y+n[1]},${z+n[2]}`);
+          if (neighborId !== undefined && (full[neighborId] || (isTransparent(block) && palette[neighborId] === block))) continue;
+        }
+        const textured = !!face.textured && !!this.atlas;
+        const target = textured ? (isTransparent(block) ? buckets.transparent : buckets.textured) : buckets.plain;
+        const tint = block.includes('water') ? '#3f76e4' : /birch/.test(block) ? '#80a755' : /spruce/.test(block) ? '#619961' : '#8ebc59';
+        const color = textured ? new THREE.Color(face.tint ? tint : '#ffffff') : colors[id];
+        for (const index of [0,1,2,0,2,3]) {
+          const vertex = face.v[index];
+          target.p.push(x+vertex[0]-dimensions[0]/2, y+vertex[1], z+vertex[2]-dimensions[2]/2);
+          target.n.push(...face.n); target.c.push(color.r, color.g, color.b);
+          target.uv.push(...(face.uv?.[index] || [0,0])); target.pos.push(x,y,z);
+        }
+      }
     }
-    for (const [data, transparent] of [[opaque, false], [glass, true]]) {
+    for (const [kind, data] of Object.entries(buckets)) {
+      if (!data.p.length) continue;
       const geometry = new THREE.BufferGeometry();
       geometry.setAttribute('position', new THREE.Float32BufferAttribute(data.p, 3));
       geometry.setAttribute('normal', new THREE.Float32BufferAttribute(data.n, 3));
       geometry.setAttribute('color', new THREE.Float32BufferAttribute(data.c, 3));
+      geometry.setAttribute('uv', new THREE.Float32BufferAttribute(data.uv, 2));
+      geometry.setAttribute('blockPosition', new THREE.Float32BufferAttribute(data.pos, 3));
       geometry.computeBoundingSphere();
-      this.group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true, transparent, opacity: transparent ? .42 : 1, depthWrite: !transparent })));
+      const transparent = kind === 'transparent';
+      this.group.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true,
+        map: kind === 'plain' ? null : this.atlas, side: THREE.DoubleSide, alphaTest: .1,
+        transparent, opacity: transparent ? .72 : 1, depthWrite: !transparent })));
     }
   }
 

@@ -6,6 +6,7 @@ import uuid
 
 from .generator import generate
 from .model import validate
+from .editing import edit_world
 
 
 class BuildStore:
@@ -18,12 +19,24 @@ class BuildStore:
     def create(self, spec, planning):
         with self._generation_slots:
             world = generate(spec)
-            validation = validate(world)
-            if not validation['passed']:
-                raise ValueError('Generated block validation failed.')
-            build_id = uuid.uuid4().hex
-            payload = {'id': build_id, 'spec': asdict(spec), 'planning': planning,
-                       'validation': validation, **world.payload()}
+            return self._save(spec, world, planning)
+
+    def edit(self, build_id, changes=None, replace=None):
+        build = self.get(build_id)
+        if build is None:
+            raise ValueError('Build expired or unknown. Generate it again.')
+        spec, original, payload = build
+        with self._generation_slots:
+            world = edit_world(original, changes, replace)
+            return self._save(spec, world, payload['planning'] | {'edited': True})
+
+    def _save(self, spec, world, planning):
+        validation = validate(world)
+        if not validation['passed']:
+            raise ValueError('Block validation failed: ' + '; '.join(validation['errors'][:3]))
+        build_id = uuid.uuid4().hex
+        payload = {'id': build_id, 'spec': asdict(spec), 'planning': planning,
+                   'validation': validation, **world.payload()}
         with self._lock:
             self._builds[build_id] = (spec, world, payload)
             while len(self._builds) > self.capacity:

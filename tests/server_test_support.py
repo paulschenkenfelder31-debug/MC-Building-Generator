@@ -9,12 +9,12 @@ from mc_builder.web_app import create_app
 
 
 class LiveServer:
-    def __init__(self, public_base_url=None):
+    def __init__(self, public_base_url=None, assets_directory=None):
         self.socket = socket.socket()
         self.socket.bind(('127.0.0.1', 0))
         self.base = f'http://127.0.0.1:{self.socket.getsockname()[1]}'
         try:
-            self.app = create_app(public_base_url or self.base)
+            self.app = create_app(public_base_url or self.base, assets_directory=assets_directory)
         except Exception:
             self.socket.close()
             raise

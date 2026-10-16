@@ -23,8 +23,21 @@ else:
     raise RuntimeError('Container never became ready')
 assert health['application']=='blockwright' and not health['ai_configured']
 assert health['mcp_endpoint']=='/mcp'
+assert health['minecraft_version']=='Java 26.3'
 assert os.getuid()==10001
 assert not any(Path(p).exists() for p in ('/app/.env','/app/.git','/run/secrets/build_ca'))
+with urllib.request.urlopen(base+'/api/blocks?limit=1') as response:
+    catalog=json.load(response)
+assert catalog['block_count']==1286 and catalog['data_version']==5023
+with urllib.request.urlopen(base+'/api/assets') as response:
+    artwork=json.load(response)
+assert artwork['available'] and artwork['version']=='26.3'
+assert artwork['texture_count']>1000 and re.fullmatch('[0-9a-f]{40}',artwork['client_sha1'])
+with urllib.request.urlopen(base+'/minecraft-assets/atlas.png') as response:
+    assert response.read(8)==b'\\x89PNG\\r\\n\\x1a\\n'
+with urllib.request.urlopen(base+'/minecraft-assets/models.json') as response:
+    models=json.load(response)
+assert len(models['blockstates'])>1000 and len(models['textures'])>1000
 with urllib.request.urlopen(base+'/') as response:
     html=response.read().decode()
 assert 'Blockwright' in html
@@ -48,10 +61,14 @@ async def verify_mcp():
         assert not result.is_error
         build=result.structured_content
         assert build['preview_url']==base+'/?build='+build['id']
+        catalog=await client.call_tool('search_blocks',{'query':'cherry_stairs'})
+        assert catalog.structured_content['total']==1
+        edited=await client.call_tool('edit_build',{'build_id':build['id'],'changes':[{'x':15,'y':40,'z':15,'block':'copper_block'}]})
+        assert not edited.is_error and edited.structured_content['id']!=build['id']
         with urllib.request.urlopen(build['downloads']['schem']) as response:
             assert response.read(2)==b'\\x1f\\x8b'
 asyncio.run(verify_mcp())
-print('Container smoke passed: custom PORT, non-root user, UI assets, 3 styles, both Minecraft exports, real MCP tool call, no build CA or credentials in runtime.')
+print('Container smoke passed: custom PORT, non-root user, UI assets, complete catalog, installed Mojang artwork, 3 styles, exports, MCP catalog/editing, no build CA or credentials in runtime.')
 '''
 
 subprocess.run(['docker', 'run', '-d', '--name', name, '-e', 'PORT=10001', image], check=True, stdout=subprocess.DEVNULL)

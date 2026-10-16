@@ -34,6 +34,8 @@ For ChatGPT, custom MCP apps/developer-mode availability depends on the account 
 | `get_building_capabilities` | Describe the three styles, supported dimensions, features, and formats. |
 | `create_build` | Generate a new build from the assistant's validated architectural parameters. |
 | `get_build` | Retrieve links and materials for a known, unexpired build ID. |
+| `search_blocks` | Search all 1,286 vanilla block IDs and state properties (Java 26.3). |
+| `edit_build` | Place/remove blocks or replace a material in a new copy of a build. |
 
 Example `create_build` arguments:
 
@@ -46,7 +48,8 @@ Example `create_build` arguments:
   "tower": true,
   "terrain": true,
   "seed": 2026,
-  "title": "Wizard observatory"
+  "title": "Wizard observatory",
+  "palette": {"wall": "cherry_planks", "stair": "oxidized_cut_copper_stairs"}
 }
 ```
 
@@ -54,7 +57,7 @@ The tool returns a summary, materials, validation, a preview link, and downloads
 
 ## Limits and hosting
 
-Supported architecture remains template-based: medieval, modern, and Japanese-inspired; footprints 15–65 per side; 1–3 main floors. Reference images, arbitrary floor plans, and vision critique are not implemented. MCP gives a connected assistant control over existing parameters; it does not add architectural capabilities by itself.
+Supported architecture remains template-based: medieval, modern, and Japanese-inspired; footprints 15–65 per side; 1–3 main floors. Reference images, arbitrary floor plans, and vision critique are not implemented. The assistant can choose building materials and edit individual blocks through the complete registry. See [block edit examples and limits](blocks-and-textures.md#mcp). The initial building layout remains template-based.
 
 Builds are stored in the same eight-entry memory cache used by the browser. Restarts, Render free-service sleeping/restarts, and newer builds can expire links. Download files promptly; ask the assistant to regenerate if a link expires. Old IDs return a clear error rather than a different user's build. No global build-list tool is exposed.
 

@@ -5,7 +5,7 @@ Browser description + controls OR assistant design via MCP
             ↓
 Offline keyword planner OR optional OpenAI planner OR connected assistant
             ↓
-Validated BuildSpec (style, footprint, floors, tower, terrain, seed)
+Validated BuildSpec (style, footprint, floors, tower, terrain, seed, material palette)
             ↓
 Deterministic geometry primitives
 foundation → shell → roof → interiors → entrance → tower → landscape
@@ -22,14 +22,17 @@ Sponge v2 .schem / Litematica v6 .litematic / JSON
 ## Responsibilities
 
 - `mc_builder/planner.py`: natural-language parameter extraction and optional remote planning. AI produces a bounded data object, never executable code or individual block placements.
-- `mc_builder/model.py`: schema, limits, block states, coordinate normalization, material counts, and versioned palette validation.
+- `mc_builder/model.py`: schema, limits, block states, coordinate normalization, material counts, and full version-pinned registry validation.
+- `mc_builder/catalog.py`: all 1,286 Java 26.3 IDs, property values, defaults and paginated search; factual data is committed separately from artwork.
+- `mc_builder/editing.py`: bounded placement/removal, paired objects and whole-material replacement in immutable build copies.
 - `mc_builder/generator.py`: reusable geometry primitives and three architectural recipes. Per-request random generators keep builds deterministic across threads.
 - `mc_builder/exporters.py`: binary NBT, Sponge VarInt block data, and Litematica's continuous packed long-array block states. Air is palette entry zero; indexing is X fastest, then Z, then Y.
 - `mc_builder/builds.py`: one eight-build memory cache shared by the browser and MCP tools; generation slots bound concurrent geometry work.
-- `mc_builder/mcp_tools.py`: official MCP SDK tools for capabilities, creating assistant-specified builds, and retrieving links. These tools never call a model provider.
+- `mc_builder/mcp_tools.py`: official MCP SDK tools for capabilities, creating assistant-specified builds, retrieving links, catalog search and block edits. These tools never call a model provider.
 - `mc_builder/web_app.py`: one ASGI application serves the browser API, static frontend, and stateless JSON Streamable HTTP MCP endpoint. Requests and design inputs are bounded.
 - `mc_builder/server.py`: Uvicorn startup on the host's public port. No API credentials are sent to the browser.
-- `web/preview.js`: exposed-face meshes, stair and door geometry, camera controls, cutaways, and PNG capture. This is a lightweight architectural preview.
+- `web/preview.js`: merged exposed-face meshes, texture-atlas rendering, camera controls, cutaways, click picking and PNG capture. `web/block-models.js` resolves vanilla model inheritance, states and multipart geometry. Engine-rendered block geometry remains approximate.
+- `scripts/prepare_minecraft_assets.py`: verify official Mojang metadata/client checksums and prepare ignored artwork files plus an atlas, separate from the committed factual registry.
 - `tests/`: planner bounds, generation at size limits, staircase clearance, door validation, full-coordinate export round trips, independent readers, API integration, and browser interactions.
 
 ## API
@@ -47,6 +50,8 @@ Sponge v2 .schem / Litematica v6 .litematic / JSON
 Response fields include `id`, `spec`, `planning`, `validation`, `dimensions` in X/Y/Z order, `palette`, `blocks` as `[x,y,z,paletteIndex]`, `materials`, and `block_count`. Coordinates in the response and exports are normalized consistently.
 
 `GET /api/builds/{id}/schem`, `/litematic`, and `/json` download a cached build. `GET /api/health` reports readiness and whether a server API-key binding is present (never its value).
+
+`GET /api/blocks?q=cherry&offset=0&limit=60` searches the full registry. `POST /api/builds/{id}/edit` creates a new build from placements or a material replacement. `GET /api/assets` reports installed artwork and provenance; `/minecraft-assets/` serves prepared textures/models when available. See [limits and examples](blocks-and-textures.md).
 
 ## Path toward the full concept
 

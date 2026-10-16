@@ -2,12 +2,14 @@
 
 Render can run this Python API and compiled frontend together, using its own HTTPS address under `onrender.com`. The repository includes `Dockerfile` and `render.yaml` for a free-plan web service. A Render account and repository access are required; no custom domain, database, or AI API key is required.
 
+For the complete block catalog and original artwork update, see [the Python-runtime build command and texture setup](blocks-and-textures.md#render).
+
 ## Deployment
 
 1. Select the `deploy/public-demo` branch, where the application files, `Dockerfile`, and `render.yaml` are committed. `main` may still contain only the original README.
 2. Sign in at https://dashboard.render.com/ with GitHub and grant access to this repository.
 3. Create a Blueprint using that repository and branch. Review the service preview; `render.yaml` requests the **free** plan. Do not select a paid plan unless you intend to pay for it.
-4. Deploy the service. Render builds the frontend in a Node stage, installs Python dependencies in a separate stage, and starts the app as a non-root user. The server honors Render's `PORT` variable.
+4. Deploy the service. Render builds the frontend in a Node stage, downloads verified original Minecraft artwork in a second build stage, installs Python dependencies in the final stage, and starts the app as a non-root user. The server honors Render's `PORT` variable.
 5. Copy the HTTPS address Render actually assigns. The app is published only after a real request to that address succeeds; the URL cannot be predicted from the service name.
 6. Check `/api/health`, generate a building in the browser, and download both Minecraft formats.
 

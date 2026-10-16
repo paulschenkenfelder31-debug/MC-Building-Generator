@@ -72,6 +72,42 @@ with sync_playwright() as p:
     assert response.value.status == 400
     page.locator('#error').wait_for(state='visible')
     assert 'width' in page.locator('#error').inner_text()
+    # The full library drives real edits, not just a decorative list.
+    page.locator('#block-search').fill('cherry_stairs')
+    page.locator('[data-block-id="minecraft:cherry_stairs"]').wait_for()
+    page.locator('[data-block-id="minecraft:cherry_stairs"]').click()
+    page.get_by_label('Block property facing', exact=True).select_option('east')
+    assert 'facing=east' in page.locator('#selected-state').inner_text()
+    page.locator('#assign-material').click()
+    assert 'cherry_stairs' in page.locator('#custom-palette').inner_text()
+    for axis, value in [('x', '15'), ('y', '40'), ('z', '15')]:
+        page.locator('#block-' + axis).fill(value)
+    with page.expect_response('**/api/builds/*/edit') as response:
+        page.locator('#place-block').click()
+    placed = response.value.json()
+    assert response.value.status == 200
+    assert any('cherry_stairs' in state and 'facing=east' in state for state in placed['palette'])
+    page.wait_for_function("document.querySelector('#schem').href.includes(" + repr(placed['id']) + ")")
+    page.locator('#block-search').fill('cherry_planks')
+    page.locator('[data-block-id="minecraft:cherry_planks"]').wait_for()
+    page.locator('[data-block-id="minecraft:cherry_planks"]').click()
+    page.locator('#replace-from').select_option('minecraft:white_terracotta')
+    with page.expect_response('**/api/builds/*/edit') as response:
+        page.locator('#replace-material').click()
+    replaced = response.value.json()
+    assert response.value.status == 200
+    assert 'minecraft:cherry_planks' in replaced['palette']
+    assert 'minecraft:white_terracotta' not in replaced['palette']
+    page.wait_for_function("document.querySelector('#schem').href.includes(" + repr(replaced['id']) + ")")
+    with page.expect_response('**/api/builds/*/edit') as response:
+        page.locator('#remove-block').click()
+    removed = response.value.json()
+    assert response.value.status == 200
+    assert not any(b[:3] == [15, 40, 15] for b in removed['blocks'])
+    page.wait_for_function("document.querySelector('#schem').href.includes(" + repr(removed['id']) + ")")
+    page.locator('#undo-edit').click()
+    page.wait_for_function("document.querySelector('#schem').href.includes(" + repr(replaced['id']) + ")")
+    page.screenshot(path=str(artifacts / 'workbench-block-library.png'), full_page=True)
     assert errors == [], errors
     page.goto(assistant_design['preview_url'])
     page.locator('#schem:not(.disabled)').wait_for(timeout=30000)
@@ -94,4 +130,4 @@ with sync_playwright() as p:
     mobile.screenshot(path=str(artifacts / 'workbench-mobile.png'), full_page=True)
     assert errors == [], errors
     browser.close()
-    print('Browser smoke passed: WebGL, cutaway, camera, downloads, 3 styles, terrain, MCP preview links, expired links, connection address, mobile layout.')
+    print('Browser smoke passed: WebGL, cutaway, camera, downloads, 3 styles, terrain, catalog search, properties, palette assignment, placement, replacement, removal, undo, MCP links, mobile layout.')

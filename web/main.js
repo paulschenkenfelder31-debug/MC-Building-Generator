@@ -14,7 +14,7 @@ document.querySelector('#app').innerHTML = `
   <header class="topbar">
     <a class="brand" href="/" aria-label="Blockwright home"><span class="brand-icon">${cube}</span>blockwright<span class="beta">LAB</span></a>
     <span class="header-caption">A little imagination. A lot of blocks.</span>
-    <span class="version"><i></i> JAVA EDITION · 1.20.1+</span>
+    <span class="version"><i></i> JAVA EDITION · 26.3</span>
   </header>
   <main class="workspace">
     <aside class="sidebar">
@@ -52,6 +52,27 @@ document.querySelector('#app').innerHTML = `
         <section class="details-card materials-card"><div class="card-heading"><h2>Material palette</h2><span class="muted">BLOCKS</span></div><div id="materials" class="materials"><span class="muted">Generate a building to see its materials.</span></div></section>
         <section class="details-card export-card"><div class="card-heading"><h2>Take it to your world</h2>${cube}</div><p>Real blocks. Ready for your next world.</p><div class="export-buttons"><a id="schem" class="download disabled" aria-disabled="true">${arrow}.schem</a><a id="litematic" class="download secondary disabled" aria-disabled="true">${arrow}.litematic</a></div><div class="export-foot"><span>WorldEdit / FAWE · Litematica</span><a id="json" class="disabled" aria-disabled="true">Design JSON ↗</a></div><small>Imports include air. Paste into a backup or an empty area.</small></section>
       </div>
+      <section class="block-library details-card" aria-label="Vanilla block library">
+        <div class="card-heading"><h2>Build with every block</h2><span class="tag" id="catalog-count">JAVA 26.3</span></div>
+        <p id="texture-status" class="help" role="status">Checking original Minecraft textures…</p>
+        <div class="library-layout"><div class="library-search">
+          <label class="small-label" for="block-search">Search the vanilla catalog</label>
+          <input id="block-search" type="search" placeholder="Try cherry, copper, glass…" maxlength="100" />
+          <div id="block-results" class="block-results" aria-label="Block search results"></div>
+          <div class="catalog-pagination"><span id="search-count" role="status"></span><button id="more-blocks" type="button">Show more</button></div>
+        </div><div class="block-editor">
+          <h3 id="selected-block">Select a block</h3><code id="selected-state"></code>
+          <div id="block-properties" class="block-properties"></div>
+          <div class="editor-row"><label for="palette-role">Use for next building</label><select id="palette-role"><option value="wall">Walls</option><option value="beam">Beams</option><option value="floor">Floors</option><option value="roof">Roof</option><option value="stair">Roof stairs</option></select><button id="assign-material" type="button">Assign</button></div>
+          <p id="custom-palette" class="help">Default architectural materials.</p><button id="reset-palette" type="button">Reset materials</button>
+          <hr><div class="editor-row"><label for="replace-from">Replace in this build</label><select id="replace-from" aria-label="Material to replace"></select><button id="replace-material" type="button">Replace all</button></div>
+          <div class="coordinates">${['x','y','z'].map(axis => `<label>${axis.toUpperCase()}<input id="block-${axis}" type="number" min="0" max="127" step="1" value="${axis === 'y' ? 30 : 15}" aria-label="Block ${axis.toUpperCase()} coordinate"></label>`).join('')}</div>
+          <div class="editor-actions"><button id="place-block" type="button">Place selected block</button><button id="remove-block" type="button">Remove block</button><button id="undo-edit" type="button" disabled>Undo edit</button></div>
+          <label class="small-label" for="edit-mode">Click blocks in the 3D preview</label><select id="edit-mode"><option value="inspect">Inspect coordinates</option><option value="place">Place on clicked face</option><option value="remove">Remove clicked block</option></select>
+          <p id="edit-status" class="help" role="status">Coordinates match the preview and JSON export. Edits create a new design.</p>
+          <p class="help">Includes technical blocks and fluids. Gravity, neighbor updates, redstone and block-entity contents are not simulated. Special blocks use approximate preview geometry; animated textures show the first frame.</p>
+        </div></div>
+      </section>
       <footer class="studio-footer"><span>Built one block at a time.</span><span>Prototype · template-based geometry · no visual AI review yet</span></footer>
     </section>
   </main>`;
@@ -63,12 +84,21 @@ try { preview = new Preview($('viewport')); }
 catch { showError(previewUnavailable); }
 let current;
 let pending = false;
+let selectedBlock;
+let selectedProperties = {};
+const paletteOverrides = {};
+const editHistory = [];
+let catalogBlocks = [];
+let catalogQuery = '';
+let catalogRequest = 0;
 
 function showError(message) { $('error').textContent = message; $('error').classList.remove('hidden'); }
 function colorFor(name) { return preview?.colorFor(name) || '#729375'; }
 
 function displayBuild(data, syncForm = false) {
   current = data;
+  const url = new URL(window.location.href); url.searchParams.set('build', data.id);
+  window.history.replaceState(null, '', url);
   $('project-title').textContent = data.spec.title;
   $('dimensions').textContent = `${data.dimensions[0]} × ${data.dimensions[2]} × ${data.dimensions[1]} blocks · including site`;
   $('mode-badge').textContent = data.planning.mode === 'assistant' ? 'ASSISTANT DESIGN' : data.planning.mode === 'ai' ? 'AI PLANNED' : 'PROCEDURAL';
@@ -77,6 +107,7 @@ function displayBuild(data, syncForm = false) {
   $('floor-count').textContent = `${data.spec.floors}${data.spec.tower ? ' + tower' : ''}`;
   $('validation-badge').textContent = data.validation.passed ? 'STATES CHECKED' : 'CHECK FAILED';
   $('design-notes').textContent = `${data.spec.width} × ${data.spec.depth} building footprint · Seed ${data.spec.seed}. ${data.planning.description}`;
+  $('replace-from').replaceChildren(...data.materials.map(({ block }) => { const option = document.createElement('option'); option.value = block; option.textContent = block.replace('minecraft:', '').replaceAll('_', ' '); return option; }));
   $('materials').replaceChildren(...data.materials.map(({ block, count }) => {
     const row = document.createElement('div'); row.className = 'material';
     const chip = document.createElement('i'); chip.style.background = colorFor(block);
@@ -108,11 +139,12 @@ async function generate(event) {
   $('error').classList.add('hidden');
   $('viewport').setAttribute('aria-busy', 'true');
   try {
-    const overrides = { seed: Number($('seed').value), terrain: $('terrain').checked };
+    const overrides = { seed: Number($('seed').value), terrain: $('terrain').checked, palette: paletteOverrides };
     if ($('style').value) overrides.style = $('style').value;
     const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: $('prompt').value, mode: $('mode').value, overrides }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Generation failed. Please try again.');
+    editHistory.length = 0; $('undo-edit').disabled = true;
     displayBuild(data);
   } catch (error) { showError(error.message || 'Could not reach the building server.'); }
   finally {
@@ -167,3 +199,109 @@ $('copy-mcp').addEventListener('click', async () => {
 const requestedBuild = new URLSearchParams(window.location.search).get('build');
 if (requestedBuild) loadBuild(requestedBuild);
 else generate();
+
+function selectedState() {
+  if (!selectedBlock) throw new Error('Select a block from the catalog first.');
+  const props = Object.entries(selectedProperties).sort(([a], [b]) => a.localeCompare(b));
+  return selectedBlock.id + (props.length ? '[' + props.map(([k,v]) => `${k}=${v}`).join(',') + ']' : '');
+}
+function updateState() { $('selected-state').textContent = selectedState(); }
+function chooseBlock(block) {
+  selectedBlock = block; selectedProperties = { ...block.defaults };
+  $('selected-block').textContent = block.id.replace('minecraft:', '').replaceAll('_', ' ');
+  $('block-properties').replaceChildren(...Object.entries(block.properties).map(([name, values]) => {
+    const label = document.createElement('label'); label.textContent = name.replaceAll('_', ' ');
+    const select = document.createElement('select'); select.setAttribute('aria-label', `Block property ${name}`);
+    for (const value of values) { const option = document.createElement('option'); option.value = value; option.textContent = value; select.append(option); }
+    select.value = selectedProperties[name];
+    select.addEventListener('change', () => { selectedProperties[name] = select.value; updateState(); });
+    label.append(select); return label;
+  }));
+  updateState();
+  document.querySelectorAll('[data-block-id]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.blockId === block.id)));
+}
+function renderBlocks() {
+  $('block-results').replaceChildren(...catalogBlocks.map(block => {
+    const button = document.createElement('button'); button.type = 'button'; button.dataset.blockId = block.id;
+    button.setAttribute('aria-pressed', String(selectedBlock?.id === block.id));
+    const image = document.createElement('span'); image.className = 'block-icon'; image.style.backgroundColor = colorFor(block.id);
+    const icon = preview?.models?.icon(block.state); if (icon) image.style.backgroundImage = `url("${icon}")`;
+    const label = document.createElement('span'); label.textContent = block.id.replace('minecraft:', '').replaceAll('_', ' ');
+    button.title = block.id; button.append(image, label); button.addEventListener('click', () => chooseBlock(block)); return button;
+  }));
+}
+async function searchBlocks(more = false) {
+  const sequence = ++catalogRequest;
+  const query = $('block-search').value.trim();
+  const offset = more && query === catalogQuery ? catalogBlocks.length : 0;
+  try {
+    const response = await fetch(`/api/blocks?q=${encodeURIComponent(query)}&offset=${offset}&limit=60`);
+    const data = await response.json(); if (!response.ok) throw new Error(data.error);
+    if (sequence !== catalogRequest) return;
+    catalogQuery = query; catalogBlocks = offset ? [...catalogBlocks, ...data.blocks] : data.blocks;
+    $('catalog-count').textContent = `${data.block_count.toLocaleString()} BLOCKS · JAVA ${data.version}`;
+    $('search-count').textContent = `${catalogBlocks.length} of ${data.total.toLocaleString()} matches`;
+    $('more-blocks').hidden = catalogBlocks.length >= data.total;
+    renderBlocks(); if (!selectedBlock && data.blocks.length) chooseBlock(data.blocks[0]);
+  } catch (error) { $('search-count').textContent = error.message || 'Could not load the catalog.'; }
+}
+let searchTimer;
+$('block-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => searchBlocks(), 180); });
+$('more-blocks').addEventListener('click', () => searchBlocks(true));
+$('assign-material').addEventListener('click', () => {
+  try { paletteOverrides[$('palette-role').value] = selectedState();
+    $('custom-palette').textContent = Object.entries(paletteOverrides).map(([role, block]) => `${role}: ${block.replace('minecraft:', '').split('[')[0]}`).join(' · ') + '. Applied when you generate.';
+  } catch (error) { $('edit-status').textContent = error.message; }
+});
+$('reset-palette').addEventListener('click', () => { for (const role of Object.keys(paletteOverrides)) delete paletteOverrides[role]; $('custom-palette').textContent = 'Default architectural materials.'; });
+async function editBuild(body) {
+  if (!current || pending) return;
+  pending = true; const oldId = current.id;
+  $('edit-status').textContent = 'Applying blocks and checking states…';
+  try {
+    const response = await fetch(`/api/builds/${oldId}/edit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await response.json(); if (!response.ok) throw new Error(data.error || 'Edit failed.');
+    editHistory.push(oldId); if (editHistory.length > 7) editHistory.shift();
+    displayBuild(data); $('undo-edit').disabled = false;
+    $('edit-status').textContent = 'Edit saved. Preview, materials and downloads are updated.';
+    $('error').classList.add('hidden');
+  } catch (error) { $('edit-status').textContent = error.message || 'Could not apply the edit.'; }
+  finally { pending = false; }
+}
+function changeAtCoordinates(remove = false) {
+  try {
+    const change = { block: remove ? 'minecraft:air' : selectedState() };
+    for (const axis of ['x','y','z']) {
+      const value = Number($(`block-${axis}`).value);
+      if (!Number.isInteger(value) || value < 0 || value > 127) throw new Error('Coordinates must be integers from 0 to 127.');
+      change[axis] = value;
+    }
+    editBuild({ changes: [change] });
+  } catch (error) { $('edit-status').textContent = error.message; }
+}
+$('place-block').addEventListener('click', () => changeAtCoordinates());
+$('remove-block').addEventListener('click', () => changeAtCoordinates(true));
+$('replace-material').addEventListener('click', () => { try { editBuild({ replace: { from: $('replace-from').value, to: selectedState() } }); } catch (error) { $('edit-status').textContent = error.message; } });
+$('undo-edit').addEventListener('click', async () => {
+  if (pending || !editHistory.length) return;
+  const id = editHistory.pop(); await loadBuild(id); $('undo-edit').disabled = !editHistory.length;
+});
+if (preview) preview.onPick = (position, normal) => {
+  const mode = $('edit-mode').value;
+  ['x','y','z'].forEach((axis, i) => { $(`block-${axis}`).value = position[i] + (mode === 'place' ? normal[i] : 0); });
+  if (mode !== 'inspect') changeAtCoordinates(mode === 'remove');
+  else $('edit-status').textContent = `Selected block at ${position.join(', ')}. Choose a block and place or remove it.`;
+};
+async function loadTextures() {
+  try {
+    const statusResponse = await fetch('/api/assets'), status = await statusResponse.json();
+    if (!status.available) { $('texture-status').textContent = status.message; return; }
+    if (preview) {
+      const response = await fetch('/minecraft-assets/models.json');
+      if (!response.ok) throw new Error('Could not load block models.');
+      await preview.enableTextures(await response.json()); renderBlocks();
+    }
+    $('texture-status').textContent = `${status.texture_count.toLocaleString()} original Minecraft textures · © Mojang / Microsoft · first animation frame`;
+  } catch { $('texture-status').textContent = 'Textures could not load. Showing color placeholders; exports still contain the selected Minecraft blocks.'; }
+}
+searchBlocks(); loadTextures();

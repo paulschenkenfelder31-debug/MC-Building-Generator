@@ -28,7 +28,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_sdk_client_create_preview_and_exports_without_model(self, model_call):
         async with Client(self.base + '/mcp') as client:
             tools = await client.list_tools()
-            self.assertEqual({tool.name for tool in tools.tools}, {'get_building_capabilities', 'create_build', 'get_build'})
+            self.assertEqual({tool.name for tool in tools.tools}, {'get_building_capabilities', 'create_build', 'get_build', 'search_blocks', 'edit_build'})
             capabilities = await client.call_tool('get_building_capabilities', {})
             self.assertFalse(capabilities.structured_content['model_api_required'])
             result = await client.call_tool('create_build', {
