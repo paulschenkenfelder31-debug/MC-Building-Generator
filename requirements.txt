@@ -1,2 +1,4 @@
 nbtlib==2.0.4
 numpy==2.2.6
+mcp==2.3.0
+uvicorn==0.54.0

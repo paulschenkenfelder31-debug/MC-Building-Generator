@@ -1,9 +1,9 @@
 # Architecture
 
 ```text
-Browser description + controls
+Browser description + controls OR assistant design via MCP
             ↓
-Offline keyword planner OR server-side OpenAI planner
+Offline keyword planner OR optional OpenAI planner OR connected assistant
             ↓
 Validated BuildSpec (style, footprint, floors, tower, terrain, seed)
             ↓
@@ -25,7 +25,10 @@ Sponge v2 .schem / Litematica v6 .litematic / JSON
 - `mc_builder/model.py`: schema, limits, block states, coordinate normalization, material counts, and versioned palette validation.
 - `mc_builder/generator.py`: reusable geometry primitives and three architectural recipes. Per-request random generators keep builds deterministic across threads.
 - `mc_builder/exporters.py`: binary NBT, Sponge VarInt block data, and Litematica's continuous packed long-array block states. Air is palette entry zero; indexing is X fastest, then Z, then Y.
-- `mc_builder/server.py`: bounded JSON requests, an eight-build memory cache, safe download names, and static frontend hosting. No API credentials are sent to the browser.
+- `mc_builder/builds.py`: one eight-build memory cache shared by the browser and MCP tools; generation slots bound concurrent geometry work.
+- `mc_builder/mcp_tools.py`: official MCP SDK tools for capabilities, creating assistant-specified builds, and retrieving links. These tools never call a model provider.
+- `mc_builder/web_app.py`: one ASGI application serves the browser API, static frontend, and stateless JSON Streamable HTTP MCP endpoint. Requests and design inputs are bounded.
+- `mc_builder/server.py`: Uvicorn startup on the host's public port. No API credentials are sent to the browser.
 - `web/preview.js`: exposed-face meshes, stair and door geometry, camera controls, cutaways, and PNG capture. This is a lightweight architectural preview.
 - `tests/`: planner bounds, generation at size limits, staircase clearance, door validation, full-coordinate export round trips, independent readers, API integration, and browser interactions.
 
@@ -55,4 +58,4 @@ Response fields include `id`, `spec`, `planning`, `validation`, `dimensions` in 
 6. **Iterate safely.** Apply one component edit at a time, revalidate, compare captures, and retain the best version with a small iteration and API-cost budget.
 7. **Support larger and shared builds.** Add durable job storage, a queue, cancellation, account controls, usage limits, and a deployment-grade HTTP stack.
 
-The optional AI planner uses one model call. Multiple AI agents, a reference-build database, and a vision feedback loop are not part of the current implementation.
+The optional direct AI planner uses one model call. The MCP path uses a design supplied by the connected assistant and makes no model-provider request. Multiple AI agents, a reference-build database, and a vision feedback loop are not part of the current implementation.

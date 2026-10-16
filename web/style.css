@@ -917,3 +917,42 @@ h2 {
     scroll-behavior: auto !important;
   }
 }
+
+.assistant-connect {
+  border-top: 1px solid #dfe3d6;
+  margin-top: 19px;
+  padding-top: 14px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: #7a856e;
+}
+.assistant-connect summary {
+  cursor: pointer;
+  color: #4b6a49;
+  font-weight: 550;
+}
+.assistant-connect summary span {
+  font-size: 8px;
+  color: #8c997a;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+.assistant-connect p { margin: 10px 0; }
+.assistant-connect label { display: block; margin-bottom: 5px; }
+.mcp-address { display: flex; gap: 5px; }
+.mcp-address input {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #d8decf;
+  background: #fbfcf7;
+  padding: 8px;
+  border-radius: 5px;
+  font-size: 9px;
+}
+.mcp-address button {
+  border: 1px solid #cbd5bc;
+  border-radius: 5px;
+  color: #4b6a49;
+  padding: 5px 9px;
+}
+#mcp-copy-status { display: block; font-size: 9px; margin-top: 5px; }

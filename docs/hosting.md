@@ -4,7 +4,7 @@ Render can run this Python API and compiled frontend together, using its own HTT
 
 ## Deployment
 
-1. Make sure the application files, `Dockerfile`, and `render.yaml` are committed in the GitHub repository and branch you will deploy. The initial remote repository contained only a README; local files in Codex do not automatically appear on GitHub.
+1. Select the `deploy/public-demo` branch, where the application files, `Dockerfile`, and `render.yaml` are committed. `main` may still contain only the original README.
 2. Sign in at https://dashboard.render.com/ with GitHub and grant access to this repository.
 3. Create a Blueprint using that repository and branch. Review the service preview; `render.yaml` requests the **free** plan. Do not select a paid plan unless you intend to pay for it.
 4. Deploy the service. Render builds the frontend in a Node stage, installs Python dependencies in a separate stage, and starts the app as a non-root user. The server honors Render's `PORT` variable.
@@ -24,6 +24,8 @@ docker run --rm --name blockwright-demo -p 3000:10000 blockwright-demo
 ```
 
 The final image includes the API and compiled frontend, not the Git checkout, `.env` files, development tools, or local artifacts.
+
+The same public port also serves `/mcp`. The official MCP SDK runs alongside the browser API under Uvicorn. Render's `RENDER_EXTERNAL_URL` supplies absolute build links and the trusted MCP hostname; no additional exposed port or model API key is needed. See [connecting an assistant](mcp.md).
 
 The smoke test checks a custom `PORT`, the non-root runtime user, frontend assets, all three building styles, and both Minecraft download formats. In this Codex runtime the Docker build also needs the provided proxy passed with Docker's standard `HTTP_PROXY`/`HTTPS_PROXY` build arguments, its hostname mapped into the build network, and the existing trusted CA bundle passed as the optional BuildKit secret `build_ca`. That CA is used only during dependency installation and is not retained in the final image. Do not disable TLS checks to build behind a proxy.
 

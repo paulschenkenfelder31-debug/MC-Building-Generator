@@ -1,14 +1,27 @@
 """Run against a started server: python tests/browser_smoke.py [base URL]."""
 import os
+import asyncio
 from pathlib import Path
 import sys
 
 from playwright.sync_api import sync_playwright
+from mcp import Client
 
 
 base = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:3000'
 artifacts = Path(__file__).resolve().parent.parent / 'artifacts'
 artifacts.mkdir(exist_ok=True)
+
+
+async def assistant_build():
+    async with Client(base + '/mcp') as client:
+        result = await client.call_tool('create_build', {'style': 'modern', 'width': 23, 'depth': 19,
+                                                       'floors': 1, 'seed': 123, 'title': 'MCP browser test villa'})
+        assert not result.is_error
+        return result.structured_content
+
+
+assistant_design = asyncio.run(assistant_build())
 
 with sync_playwright() as p:
     options = {'headless': True, 'args': ['--enable-unsafe-swiftshader']}
@@ -60,6 +73,19 @@ with sync_playwright() as p:
     page.locator('#error').wait_for(state='visible')
     assert 'width' in page.locator('#error').inner_text()
     assert errors == [], errors
+    page.goto(assistant_design['preview_url'])
+    page.locator('#schem:not(.disabled)').wait_for(timeout=30000)
+    assert page.locator('#project-title').inner_text() == 'MCP browser test villa'
+    assert page.locator('#mode-badge').inner_text() == 'ASSISTANT DESIGN'
+    assert page.locator('#seed').input_value() == '123'
+    assert page.locator('#style').input_value() == 'modern'
+    assert page.locator('#schem').get_attribute('href').endswith(assistant_design['id'] + '/schem')
+    page.locator('#assistant-connect summary').click()
+    assert page.locator('#mcp-url').input_value() == base + '/mcp'
+    page.screenshot(path=str(artifacts / 'workbench-mcp.png'), full_page=True)
+    page.goto(base + '/?build=expired-build')
+    page.locator('#error').wait_for(state='visible')
+    assert 'expired' in page.locator('#error').inner_text().lower()
     mobile = browser.new_page(viewport={'width': 390, 'height': 844}, device_scale_factor=1)
     mobile.on('pageerror', lambda error: errors.append(str(error)))
     mobile.goto(base)
@@ -68,4 +94,4 @@ with sync_playwright() as p:
     mobile.screenshot(path=str(artifacts / 'workbench-mobile.png'), full_page=True)
     assert errors == [], errors
     browser.close()
-    print('Browser smoke passed: WebGL, cutaway, camera, 4 downloads, 3 styles, terrain toggle, errors, mobile layout.')
+    print('Browser smoke passed: WebGL, cutaway, camera, downloads, 3 styles, terrain, MCP preview links, expired links, connection address, mobile layout.')

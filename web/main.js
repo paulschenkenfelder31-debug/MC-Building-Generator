@@ -33,6 +33,7 @@ document.querySelector('#app').innerHTML = `
         <button class="generate" id="generate" type="submit">${sparkle}<span>Generate building</span><span class="key-hint">↵</span></button>
       </form>
       <div class="offline-note"><span class="note-dot"></span><p id="planner-note">Runs locally. No account or API key needed.<br>Curated geometry, with an optional AI planner.</p></div>
+      <details class="assistant-connect" id="assistant-connect"><summary>Build with ChatGPT or Codex <span>No API key</span></summary><p>Describe your building in an assistant that supports custom MCP servers. It can send the design here and give you a preview link.</p><label for="mcp-url">MCP server address</label><div class="mcp-address"><input id="mcp-url" readonly aria-label="MCP server address" /><button id="copy-mcp" type="button">Copy</button></div><span id="mcp-copy-status" role="status"></span><p>Your assistant does the planning in chat. This website does not call your subscription or an AI model through MCP.</p></details>
       <div class="sidebar-foot"><span>IDEA → DESIGN → BLOCKS → MINECRAFT</span><span>↗</span></div>
     </aside>
     <section class="studio" aria-label="Building workbench">
@@ -66,6 +67,38 @@ let pending = false;
 function showError(message) { $('error').textContent = message; $('error').classList.remove('hidden'); }
 function colorFor(name) { return preview?.colorFor(name) || '#729375'; }
 
+function displayBuild(data, syncForm = false) {
+  current = data;
+  $('project-title').textContent = data.spec.title;
+  $('dimensions').textContent = `${data.dimensions[0]} × ${data.dimensions[2]} × ${data.dimensions[1]} blocks · including site`;
+  $('mode-badge').textContent = data.planning.mode === 'assistant' ? 'ASSISTANT DESIGN' : data.planning.mode === 'ai' ? 'AI PLANNED' : 'PROCEDURAL';
+  $('block-count').textContent = data.block_count.toLocaleString();
+  $('material-count').textContent = data.materials.length;
+  $('floor-count').textContent = `${data.spec.floors}${data.spec.tower ? ' + tower' : ''}`;
+  $('validation-badge').textContent = data.validation.passed ? 'STATES CHECKED' : 'CHECK FAILED';
+  $('design-notes').textContent = `${data.spec.width} × ${data.spec.depth} building footprint · Seed ${data.spec.seed}. ${data.planning.description}`;
+  $('materials').replaceChildren(...data.materials.map(({ block, count }) => {
+    const row = document.createElement('div'); row.className = 'material';
+    const chip = document.createElement('i'); chip.style.background = colorFor(block);
+    const name = document.createElement('span'); name.textContent = block.replace('minecraft:', '').replaceAll('_', ' ');
+    const amount = document.createElement('b'); amount.textContent = count.toLocaleString();
+    row.append(chip, name, amount); return row;
+  }));
+  for (const format of ['schem', 'litematic', 'json']) {
+    $(format).href = `/api/builds/${data.id}/${format}`;
+    $(format).classList.remove('disabled'); $(format).removeAttribute('aria-disabled');
+    $(format).setAttribute('download', `building-${data.spec.seed}.${format}`);
+  }
+  $('layer').max = data.dimensions[1] - 1; $('layer').value = $('layer').max;
+  $('layer-value').textContent = 'All layers';
+  if (syncForm) {
+    $('style').value = data.spec.style; $('seed').value = data.spec.seed; $('terrain').checked = data.spec.terrain;
+    $('prompt').value = `A ${data.spec.width}×${data.spec.depth} ${data.spec.style} building with ${data.spec.floors} floors. ${data.spec.tower ? 'Include a corner tower.' : 'No tower.'}`;
+  }
+  if (preview) { preview.load(data); setView('iso'); }
+  else showError(previewUnavailable);
+}
+
 async function generate(event) {
   event?.preventDefault();
   if (pending || !$('build-form').reportValidity()) return;
@@ -80,35 +113,26 @@ async function generate(event) {
     const response = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: $('prompt').value, mode: $('mode').value, overrides }) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Generation failed. Please try again.');
-    current = data;
-    $('project-title').textContent = data.spec.title;
-    $('dimensions').textContent = `${data.dimensions[0]} × ${data.dimensions[2]} × ${data.dimensions[1]} blocks · including site`;
-    $('mode-badge').textContent = data.planning.mode === 'ai' ? 'AI PLANNED' : 'PROCEDURAL';
-    $('block-count').textContent = data.block_count.toLocaleString();
-    $('material-count').textContent = data.materials.length;
-    $('floor-count').textContent = `${data.spec.floors}${data.spec.tower ? ' + tower' : ''}`;
-    $('validation-badge').textContent = data.validation.passed ? 'STATES CHECKED' : 'CHECK FAILED';
-    $('design-notes').textContent = `${data.spec.width} × ${data.spec.depth} building footprint · Seed ${data.spec.seed}. ${data.planning.description}`;
-    $('materials').replaceChildren(...data.materials.map(({ block, count }) => {
-      const row = document.createElement('div'); row.className = 'material';
-      const chip = document.createElement('i'); chip.style.background = colorFor(block);
-      const name = document.createElement('span'); name.textContent = block.replace('minecraft:', '').replaceAll('_', ' ');
-      const amount = document.createElement('b'); amount.textContent = count.toLocaleString();
-      row.append(chip, name, amount); return row;
-    }));
-    for (const format of ['schem', 'litematic', 'json']) {
-      $(format).href = `/api/builds/${data.id}/${format}`;
-      $(format).classList.remove('disabled'); $(format).removeAttribute('aria-disabled');
-      $(format).setAttribute('download', `building-${data.spec.seed}.${format}`);
-    }
-    $('layer').max = data.dimensions[1] - 1; $('layer').value = $('layer').max;
-    $('layer-value').textContent = 'All layers';
-    if (preview) { preview.load(data); setView('iso'); }
-    else showError(previewUnavailable);
+    displayBuild(data);
   } catch (error) { showError(error.message || 'Could not reach the building server.'); }
   finally {
     pending = false; $('generate').disabled = false; $('loading').classList.add('hidden');
     $('viewport').setAttribute('aria-busy', 'false');
+  }
+}
+
+async function loadBuild(buildId) {
+  pending = true; $('generate').disabled = true;
+  $('loading').classList.remove('hidden'); $('viewport').setAttribute('aria-busy', 'true');
+  try {
+    const response = await fetch(`/api/builds/${encodeURIComponent(buildId)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'This build could not be loaded.');
+    displayBuild(data, true);
+  } catch (error) { showError(error.message || 'Could not load this build. You can generate a new one.'); }
+  finally {
+    pending = false; $('generate').disabled = false;
+    $('loading').classList.add('hidden'); $('viewport').setAttribute('aria-busy', 'false');
   }
 }
 
@@ -130,4 +154,16 @@ $('snapshot').addEventListener('click', () => {
 $('mode').addEventListener('change', () => {
   $('planner-note').textContent = $('mode').value === 'ai' ? 'AI planning sends your description to OpenAI. Uses a server-side API key and may incur API charges.' : 'Runs locally. No account or API key needed. Curated geometry, with an optional AI planner.';
 });
-generate();
+$('mcp-url').value = `${window.location.origin}/mcp`;
+$('copy-mcp').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('mcp-url').value);
+    $('mcp-copy-status').textContent = 'Address copied. Add it to your assistant’s MCP server settings.';
+  } catch {
+    $('mcp-url').focus(); $('mcp-url').select();
+    $('mcp-copy-status').textContent = 'Select and copy the address above.';
+  }
+});
+const requestedBuild = new URLSearchParams(window.location.search).get('build');
+if (requestedBuild) loadBuild(requestedBuild);
+else generate();

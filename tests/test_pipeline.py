@@ -2,13 +2,10 @@ import gzip
 import io
 import json
 import tempfile
-import threading
 import unittest
 import urllib.error
 import urllib.request
 from unittest.mock import patch
-from functools import partial
-from http.server import ThreadingHTTPServer
 
 import nbtlib
 from litemapy import Region, Schematic
@@ -17,7 +14,7 @@ from mc_builder.exporters import litematic, pack_states, schematic, varint
 from mc_builder.generator import generate
 from mc_builder.model import BuildSpec, validate, World
 from mc_builder.planner import plan
-from mc_builder.server import Handler, ROOT
+from server_test_support import LiveServer
 
 
 def read_nbt(data):
@@ -186,16 +183,12 @@ class ExportTests(unittest.TestCase):
 class APITests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.server = ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=str(ROOT / 'dist')))
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-        cls.thread.start()
-        cls.base = f'http://127.0.0.1:{cls.server.server_port}'
+        cls.server = LiveServer().start()
+        cls.base = cls.server.base
 
     @classmethod
     def tearDownClass(cls):
-        cls.server.shutdown()
-        cls.server.server_close()
-        cls.thread.join()
+        cls.server.stop()
 
     def post(self, data):
         request = urllib.request.Request(self.base + '/api/generate', data=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})
