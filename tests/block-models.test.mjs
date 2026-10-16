@@ -40,3 +40,35 @@ test('multipart conditions and non-cube geometry preserve slab height', () => {
   assert.equal(models.faces('minecraft:air').length, 0);
   assert.ok(models.faces('minecraft:unknown_entity').every(face => !face.textured));
 });
+
+test('Java 26.3 sprite objects resolve through inherited aliases without interrupting other blocks', () => {
+  const models = library();
+  models.models['block/glass'] = { parent: 'block/cube', textures: {
+    all: { force_translucent: true, sprite: 'minecraft:block/test' },
+  } };
+  models.blockstates.glass = { variants: { '': { model: 'block/glass' } } };
+  const faces = models.faces('minecraft:glass');
+  assert.equal(faces.length, 6);
+  assert.ok(faces.every(face => face.textured && face.translucent));
+  assert.equal(models.icon('minecraft:glass'), '/minecraft-assets/textures/block/test.png');
+  assert.ok(models.faces('minecraft:test[axis=y]').every(face => face.textured));
+});
+
+test('missing, malformed, and cyclic texture references do not abort a build', () => {
+  const models = library();
+  const model = { textures: { loop: '#other', other: '#loop', missing: '#absent',
+    object: { sprite: { bad: true } }, number: 3, array: [] } };
+  for (const value of ['#loop', '#missing', '#object', '#number', '#array', {}, 3, null]) {
+    assert.equal(models.texture(value, model), undefined);
+  }
+  assert.equal(models.texture({ sprite: '#alias' }, { textures: { alias: 'minecraft:block/test' } }), 'block/test');
+});
+
+test('catalog icons use available sprites beyond the block atlas and item fallbacks', () => {
+  const models = new BlockModels({ ...library(), texture_files: ['block/test', 'item/engine_block', 'entity/test'] });
+  models.models['block/particle'] = { textures: { particle: { sprite: 'minecraft:entity/test' } } };
+  models.blockstates.engine = { variants: { '': { model: 'block/particle' } } };
+  assert.equal(models.icon('minecraft:engine'), '/minecraft-assets/textures/entity/test.png');
+  assert.equal(models.icon('minecraft:engine_block'), '/minecraft-assets/textures/item/engine_block.png');
+  assert.equal(models.icon('minecraft:not_present'), null);
+});

@@ -29,10 +29,22 @@ with tempfile.TemporaryDirectory(prefix='blockwright-texture-fixture-') as tempo
             side: {'texture': '#all', 'cullface': side} for side in ['east','west','up','down','north','south']}}]}
     with zipfile.ZipFile(folder / 'fixture.jar', 'w') as jar:
         jar.writestr('assets/minecraft/textures/block/fixture.png', png.getvalue())
+        jar.writestr('assets/minecraft/textures/entity/fixture.png', png.getvalue())
+        jar.writestr('assets/minecraft/textures/item/red_bed.png', png.getvalue())
         jar.writestr('assets/minecraft/models/block/fixture.json', json.dumps(model))
-        for name in ['stone', 'stone_bricks', 'spruce_planks', 'white_terracotta']:
-            jar.writestr(f'assets/minecraft/blockstates/{name}.json', '{"variants":{"":{"model":"minecraft:block/fixture"}}}')
-    package(folder / 'fixture.jar', folder / 'assets', {'client_sha1': 'synthetic-fixture-only'})
+        # Match Java 26.3's glass sprite descriptor through inherited texture aliases.
+        jar.writestr('assets/minecraft/models/block/glass_fixture.json', json.dumps({
+            'parent': 'minecraft:block/fixture',
+            'textures': {'all': {'sprite': 'minecraft:block/fixture', 'force_translucent': True}},
+        }))
+        jar.writestr('assets/minecraft/models/block/external_fixture.json', json.dumps({
+            'parent': 'minecraft:block/fixture', 'textures': {'all': {'sprite': 'minecraft:entity/fixture'}},
+        }))
+        jar.writestr('assets/minecraft/blockstates/copper_block.json', '{"variants":{"":{"model":"minecraft:block/external_fixture"}}}')
+        for name in ['stone', 'stone_bricks', 'spruce_planks', 'white_terracotta', 'glass']:
+            reference = 'minecraft:block/glass_fixture' if name == 'glass' else 'minecraft:block/fixture'
+            jar.writestr(f'assets/minecraft/blockstates/{name}.json', json.dumps({'variants': {'': {'model': reference}}}))
+    manifest = package(folder / 'fixture.jar', folder / 'assets', {'client_sha1': 'synthetic-fixture-only'})
     server = LiveServer(assets_directory=folder / 'assets').start()
     try:
         with sync_playwright() as p:
@@ -44,11 +56,26 @@ with tempfile.TemporaryDirectory(prefix='blockwright-texture-fixture-') as tempo
             errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
             page.goto(server.base)
             page.locator('#schem:not(.disabled)').wait_for(timeout=30000)
-            page.wait_for_function("document.querySelector('#texture-status').textContent.includes('1 original')")
+            page.wait_for_function("document.querySelector('#texture-status').textContent.includes('3 original')")
+            library = page.request.get(server.base + '/minecraft-assets/models.json').json()
+            assert 'entity/fixture' in library['textures'], 'Non-block model sprites missing from the atlas'
             page.locator('#block-search').fill('stone_bricks')
             page.locator('[data-block-id="minecraft:stone_bricks"]').wait_for()
             icon = page.locator('[data-block-id="minecraft:stone_bricks"] .block-icon')
             assert 'fixture.png' in icon.evaluate('e => getComputedStyle(e).backgroundImage')
+            page.locator('#block-search').fill('glass')
+            page.locator('[data-block-id="minecraft:glass"]').wait_for()
+            assert 'fixture.png' in page.locator('[data-block-id="minecraft:glass"] .block-icon').evaluate('e => getComputedStyle(e).backgroundImage')
+            # Loading a new building after texture initialization must also remain usable.
+            with page.expect_response('**/api/generate') as generated:
+                page.locator('#generate').click()
+            assert generated.value.status == 200
+            page.locator('#loading').wait_for(state='hidden')
+            assert page.locator('#error').is_hidden()
+            page.locator('#block-search').fill('red_bed')
+            page.locator('[data-block-id="minecraft:red_bed"]').wait_for()
+            assert 'item/red_bed.png' in page.locator('[data-block-id="minecraft:red_bed"] .block-icon').evaluate('e => getComputedStyle(e).backgroundImage')
+            assert page.request.get(server.base + '/minecraft-assets/textures/item/red_bed.png').status == 200
             assert page.request.get(server.base + '/minecraft-assets/atlas.png').status == 200
             page.locator('canvas').scroll_into_view_if_needed()
             box = page.locator('canvas').bounding_box()
@@ -61,6 +88,7 @@ with tempfile.TemporaryDirectory(prefix='blockwright-texture-fixture-') as tempo
             assert hit, 'Could not pick a block from the rendered geometry'
             page.locator('#block-search').fill('copper_block')
             page.locator('[data-block-id="minecraft:copper_block"]').wait_for()
+            assert 'entity/fixture.png' in page.locator('[data-block-id="minecraft:copper_block"] .block-icon').evaluate('e => getComputedStyle(e).backgroundImage')
             page.locator('[data-block-id="minecraft:copper_block"]').click()
             page.locator('#edit-mode').select_option('place')
             page.locator('canvas').scroll_into_view_if_needed()

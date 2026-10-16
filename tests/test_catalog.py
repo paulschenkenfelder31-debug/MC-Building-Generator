@@ -176,6 +176,7 @@ class AssetPreparationTests(unittest.TestCase):
                 jar.writestr('assets/minecraft/textures/item/diamond.png', png.getvalue())
                 jar.writestr('assets/minecraft/blockstates/stone.json', '{"variants":{"":{"model":"minecraft:block/stone"}}}')
                 jar.writestr('assets/minecraft/models/block/stone.json', '{"textures":{"all":"minecraft:block/stone"}}')
+                jar.writestr('assets/minecraft/models/block/external_sprite.json', '{"textures":{"all":{"sprite":"minecraft:item/diamond","force_translucent":true}}}')
                 jar.writestr('assets/minecraft/../../escape.png', b'no')
                 jar.writestr('client.class', b'no')
             destination = directory / 'prepared'
@@ -183,9 +184,16 @@ class AssetPreparationTests(unittest.TestCase):
             self.assertEqual(manifest['texture_count'], 2)
             self.assertEqual((destination / 'textures/block/stone.png').read_bytes(), png.getvalue())
             library = json.loads((destination / 'models.json').read_text())
+            self.assertEqual(set(library['texture_files']), {'block/stone', 'item/diamond'})
+            self.assertIn('item/diamond', library['textures'], 'Model-referenced sprites outside block/ must reach the atlas.')
+            self.assertEqual(manifest['block_texture_count'], 1)
+            self.assertEqual(manifest['atlas_texture_count'], 2)
             with Image.open(destination / 'atlas.png') as atlas:
                 u, v, _, _ = library['textures']['block/stone']
                 self.assertEqual(atlas.getpixel((round(u * atlas.width) + 16, round(v * atlas.height) + 16)), (255, 0, 0, 255))
+                # Static non-block sprites can be rectangular, rather than stacked animation frames.
+                u, v, _, _ = library['textures']['item/diamond']
+                self.assertEqual(atlas.getpixel((round(u * atlas.width) + 16, round(v * atlas.height) + 24)), (0, 0, 255, 255))
             self.assertFalse((directory / 'escape.png').exists())
             self.assertFalse((destination / 'client.class').exists())
             server = LiveServer(assets_directory=destination).start()

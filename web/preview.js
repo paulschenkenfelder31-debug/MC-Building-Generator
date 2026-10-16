@@ -72,7 +72,7 @@ export class Preview {
     const buckets = { textured: bucket(), transparent: bucket(), plain: bucket() };
     const isTransparent = block => /glass|water(?:\[|$)|ice(?:\[|$)|slime_block|honey_block/.test(block);
     const facesById = palette.map(block => this.models?.faces(block) || FACE_DATA.map(([,n,v]) => ({ n, v, cull:n, textured:false })));
-    const full = facesById.map((faces, id) => !/leaves|glass|water|ice|slime|honey|air|barrier|light(?:\[|$)/.test(palette[id]) && faces.length === 6 && faces.every(face => face.v.every(v => v.every(n => n === 0 || n === 1))));
+    const full = facesById.map((faces, id) => !/leaves|glass|water|ice|slime|honey|air|barrier|light(?:\[|$)/.test(palette[id]) && faces.length === 6 && faces.every(face => !face.translucent && face.v.every(v => v.every(n => n === 0 || n === 1))));
     const colors = palette.map(b => new THREE.Color(this.colorFor(b)));
     for (const [x,y,z,id] of blocks) {
       if (y > layer) continue;
@@ -84,7 +84,7 @@ export class Preview {
           if (neighborId !== undefined && (full[neighborId] || (isTransparent(block) && palette[neighborId] === block))) continue;
         }
         const textured = !!face.textured && !!this.atlas;
-        const target = textured ? (isTransparent(block) ? buckets.transparent : buckets.textured) : buckets.plain;
+        const target = textured ? (face.translucent || isTransparent(block) ? buckets.transparent : buckets.textured) : buckets.plain;
         const tint = block.includes('water') ? '#3f76e4' : /birch/.test(block) ? '#80a755' : /spruce/.test(block) ? '#619961' : '#8ebc59';
         const color = textured ? new THREE.Color(face.tint ? tint : '#ffffff') : colors[id];
         for (const index of [0,1,2,0,2,3]) {

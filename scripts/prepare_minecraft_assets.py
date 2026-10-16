@@ -50,6 +50,7 @@ def package(client, destination, provenance):
         stage = Path(temporary) / 'assets'
         stage.mkdir()
         models, states, textures = {}, {}, {}
+        texture_files = set()
         with zipfile.ZipFile(client) as archive:
             total = 0
             for entry in archive.infolist():
@@ -77,12 +78,31 @@ def package(client, destination, provenance):
                     models[key] = json.loads(data)
                 elif category == 'blockstates':
                     states[key] = json.loads(data)
-                elif key.startswith('block/'):
+                else:
+                    texture_files.add(key)
+                if category == 'textures' and key.startswith('block/'):
                     with Image.open(io.BytesIO(data)) as image:
                         image = image.convert('RGBA')
                         # Animated vanilla textures are vertically stacked square frames.
                         image = image.crop((0, 0, image.width, min(image.width, image.height)))
                         textures[key] = image.resize((32, 32), Image.Resampling.NEAREST)
+        # Some model sprites live outside textures/block. Include those in the atlas too.
+        referenced = set()
+        for name, model in models.items():
+            if not name.startswith('block/'):
+                continue
+            values = list(model.get('textures', {}).values())
+            values += [face.get('texture') for element in model.get('elements', [])
+                       for face in element.get('faces', {}).values()]
+            for value in values:
+                if isinstance(value, dict):
+                    value = value.get('sprite')
+                if isinstance(value, str) and not value.startswith('#'):
+                    referenced.add(value.removeprefix('minecraft:'))
+        for key in sorted((referenced & texture_files) - textures.keys()):
+            with Image.open(stage / 'textures' / (key + '.png')) as image:
+                image = image.convert('RGBA')
+                textures[key] = image.resize((32, 32), Image.Resampling.NEAREST)
         if not states or not textures:
             raise ValueError('Client does not contain vanilla block artwork.')
         missing = sorted(name.removeprefix('minecraft:') for name in REGISTRY['blocks']
@@ -103,11 +123,13 @@ def package(client, destination, provenance):
             atlas.paste(texture.crop((0, 31, 32, 32)).resize((32, 2)), (x, y + 32))
             uv[name] = [x / side, y / side, 32 / side, 32 / side]
         atlas.save(stage / 'atlas.png')
-        (stage / 'models.json').write_text(json.dumps({'models': models, 'blockstates': states, 'textures': uv}, separators=(',', ':')))
+        (stage / 'models.json').write_text(json.dumps({'models': models, 'blockstates': states,
+            'textures': uv, 'texture_files': sorted(texture_files)}, separators=(',', ':')))
         manifest = {'version': REGISTRY['version'], 'data_version': REGISTRY['data_version'],
                     'source': 'Official Mojang Minecraft Java client', **provenance,
                     'texture_count': len(list((stage / 'textures').rglob('*.png'))),
-                    'block_texture_count': len(textures), 'blockstate_count': len(states),
+                    'block_texture_count': sum(name.startswith('block/') for name in textures),
+                    'atlas_texture_count': len(textures), 'blockstate_count': len(states),
                     'missing_blockstates': missing,
                     'notice': 'Minecraft artwork © Mojang / Microsoft. Not affiliated with Mojang.',
                     'preview_limits': ['First animation frame only', 'Entity-rendered blocks use approximate geometry',

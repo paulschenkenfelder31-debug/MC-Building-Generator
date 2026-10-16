@@ -8,12 +8,16 @@ export const FACE_DATA = [
   ['south', [0,0,1], [[1,0,1],[1,1,1],[0,1,1],[0,0,1]]],
   ['north', [0,0,-1], [[0,0,0],[0,1,0],[1,1,0],[1,0,0]]],
 ];
-const strip = value => value?.replace('minecraft:', '');
+const strip = value => typeof value === 'string' ? value.replace(/^minecraft:/, '') : undefined;
 const axis = { x: new THREE.Vector3(1,0,0), y: new THREE.Vector3(0,1,0), z: new THREE.Vector3(0,0,1) };
 const radians = degrees => degrees * Math.PI / 180;
 
 export class BlockModels {
-  constructor(library) { Object.assign(this, library); this.cache = new Map(); this.parents = new Map(); }
+  constructor(library) {
+    Object.assign(this, library);
+    this.textureFiles = new Set(library.texture_files || Object.keys(this.textures));
+    this.cache = new Map(); this.parents = new Map();
+  }
   resolve(name, chain = new Set()) {
     name = strip(name);
     if (this.parents.has(name)) return this.parents.get(name);
@@ -24,11 +28,23 @@ export class BlockModels {
     const model = { ...parent, ...own, textures: { ...parent.textures, ...own.textures } };
     this.parents.set(name, model); return model;
   }
-  texture(value, model) {
+  textureInfo(value, model) {
+    // Vanilla uses both texture strings and { sprite, force_translucent } descriptors.
     const seen = new Set();
-    while (value?.startsWith('#') && !seen.has(value)) { seen.add(value); value = model.textures?.[value.slice(1)]; }
-    return strip(value);
+    let translucent = false;
+    while (value !== null && value !== undefined && !seen.has(value)) {
+      seen.add(value);
+      if (typeof value === 'object' && !Array.isArray(value)) {
+        translucent ||= value.force_translucent === true;
+        value = value.sprite;
+      } else if (typeof value === 'string') {
+        if (!value.startsWith('#')) return { name: strip(value), translucent };
+        value = model.textures?.[value.slice(1)];
+      } else break;
+    }
+    return { name: undefined, translucent };
   }
+  texture(value, model) { return this.textureInfo(value, model).name; }
   matches(condition, props) {
     if (!condition) return true;
     if (condition.OR) return condition.OR.some(c => this.matches(c, props));
@@ -52,9 +68,16 @@ export class BlockModels {
   icon(state) {
     for (const app of this.applications(state)) {
       const model = this.resolve(app.model);
-      const texture = this.texture(model.textures?.particle || Object.values(model.textures || {})[0], model);
-      if (this.textures[texture]) return `/minecraft-assets/textures/${texture}.png`;
+      for (const value of [model.textures?.particle, ...Object.values(model.textures || {})]) {
+        const texture = this.texture(value, model);
+        if (this.textureFiles.has(texture)) return `/minecraft-assets/textures/${texture}.png`;
+      }
     }
+    const name = strip(state).split('[')[0];
+    const direct = `block/${name}${['water', 'lava'].includes(name) ? '_still' : ''}`;
+    if (this.textureFiles.has(direct)) return `/minecraft-assets/textures/${direct}.png`;
+    // Some engine-rendered blocks have no ordinary block model; use their real item image when present.
+    if (this.textureFiles.has(`item/${name}`)) return `/minecraft-assets/textures/item/${name}.png`;
     return null;
   }
   faces(state) {
@@ -83,7 +106,8 @@ export class BlockModels {
         };
         for (const [name, normal, vertices] of FACE_DATA) {
           const face = element.faces?.[name]; if (!face) continue;
-          const texture = this.textures[this.texture(face.texture, model)];
+          const info = this.textureInfo(face.texture, model);
+          const texture = this.textures[info.name];
           const v = vertices.map(vertex => rotate(vertex.map((n, i) => from[i] + n * (to[i] - from[i]))));
           const n = new THREE.Vector3().subVectors(v[1], v[0]).cross(new THREE.Vector3().subVectors(v[2], v[0])).normalize();
           let cull = null;
@@ -105,7 +129,7 @@ export class BlockModels {
           uv = uv.map((_, i) => uv[(i + turns) % 4]);
           faces.push({ v: v.map(p => p.toArray()), n: n.toArray(), cull,
             uv: uv.map(([u,w]) => texture ? [texture[0] + u/16*texture[2], 1-texture[1]-w/16*texture[3]] : [0,0]),
-            textured: !!texture, tint: face.tintindex !== undefined });
+            textured: !!texture, translucent: info.translucent, tint: face.tintindex !== undefined });
         }
       }
     }
