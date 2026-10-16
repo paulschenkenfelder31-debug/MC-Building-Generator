@@ -165,6 +165,13 @@ class AssetPreparationTests(unittest.TestCase):
             png = io.BytesIO(); image.save(png, format='PNG')
             client = directory / 'fixture.jar'
             with zipfile.ZipFile(client, 'w') as jar:
+                # Official client JARs include directory records, including the namespace root.
+                for name in ('assets/', 'assets/minecraft/', 'assets/minecraft/textures/',
+                             'assets/minecraft/textures/block/', 'assets/minecraft/models/',
+                             'assets/minecraft/blockstates/', 'assets/minecraft/textures/fake.png/'):
+                    jar.writestr(name, b'')
+                # A normalized namespace-root record should also be harmless.
+                jar.writestr('assets/minecraft/.', b'')
                 jar.writestr('assets/minecraft/textures/block/stone.png', png.getvalue())
                 jar.writestr('assets/minecraft/textures/item/diamond.png', png.getvalue())
                 jar.writestr('assets/minecraft/blockstates/stone.json', '{"variants":{"":{"model":"minecraft:block/stone"}}}')

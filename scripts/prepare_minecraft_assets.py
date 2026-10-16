@@ -54,9 +54,12 @@ def package(client, destination, provenance):
             total = 0
             for entry in archive.infolist():
                 path = PurePosixPath(entry.filename)
-                if '..' in path.parts or not entry.filename.startswith('assets/minecraft/'):
+                if (entry.is_dir() or '..' in path.parts
+                        or not entry.filename.startswith('assets/minecraft/')):
                     continue
                 relative = PurePosixPath(*path.parts[2:])
+                if not relative.parts:
+                    continue
                 category = relative.parts[0]
                 allowed = ((category == 'textures' and relative.suffix == '.png') or
                            (category in ('models', 'blockstates') and relative.suffix == '.json'))
