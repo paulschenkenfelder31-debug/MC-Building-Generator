@@ -1,0 +1,20 @@
+{
+  "name": "mc-building-generator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/run.mjs dev",
+    "dev:frontend": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "start": "node scripts/run.mjs start",
+    "public": ".venv/bin/python scripts/public_link.py",
+    "test": "node scripts/run.mjs test"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "vite": "6.4.4"
+  }
+}

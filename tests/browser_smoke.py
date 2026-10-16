@@ -1,0 +1,71 @@
+"""Run against a started server: python tests/browser_smoke.py [base URL]."""
+import os
+from pathlib import Path
+import sys
+
+from playwright.sync_api import sync_playwright
+
+
+base = sys.argv[1] if len(sys.argv) > 1 else 'http://127.0.0.1:3000'
+artifacts = Path(__file__).resolve().parent.parent / 'artifacts'
+artifacts.mkdir(exist_ok=True)
+
+with sync_playwright() as p:
+    options = {'headless': True, 'args': ['--enable-unsafe-swiftshader']}
+    if os.environ.get('CHROMIUM_PATH'):
+        options['executable_path'] = os.environ['CHROMIUM_PATH']
+    browser = p.chromium.launch(**options)
+    page = browser.new_page(viewport={'width': 1440, 'height': 1000}, device_scale_factor=1)
+    errors = []
+    page.on('pageerror', lambda error: errors.append(str(error)))
+    page.goto(base)
+    page.locator('#schem:not(.disabled)').wait_for(timeout=30000)
+    assert page.locator('canvas').is_visible(), 'WebGL preview missing'
+    assert page.locator('#error').is_hidden(), 'Initial generation failed'
+    page.screenshot(path=str(artifacts / 'workbench-desktop.png'), full_page=True)
+    page.locator('#layer').fill('8')
+    page.locator('#layer').dispatch_event('input')
+    assert page.locator('#layer-value').inner_text() == 'Layer 8'
+    page.locator('[data-view=top]').click()
+    assert page.locator('[data-view=top]').get_attribute('aria-pressed') == 'true'
+    page.screenshot(path=str(artifacts / 'workbench-cutaway.png'), full_page=True)
+    for fmt in ('schem', 'litematic', 'json'):
+        with page.expect_download() as download:
+            page.locator('#' + fmt).click()
+        path = artifacts / download.value.suggested_filename
+        download.value.save_as(path)
+        assert path.stat().st_size > 500
+    with page.expect_download() as download:
+        page.locator('#snapshot').click()
+    download.value.save_as(artifacts / 'preview-capture.png')
+    for example, style in (('villa', 'modern'), ('temple', 'japanese')):
+        page.locator(f'[data-example={example}]').click()
+        with page.expect_response('**/api/generate') as response:
+            page.locator('#generate').click()
+        result = response.value.json()
+        assert result['spec']['style'] == style
+        page.locator('#loading').wait_for(state='hidden')
+        assert page.locator('#error').is_hidden()
+    page.locator('#terrain').uncheck()
+    with page.expect_response('**/api/generate') as response:
+        page.locator('#generate').click()
+    result = response.value.json()
+    assert not result['spec']['terrain']
+    assert 'minecraft:grass_block' not in result['palette']
+    page.locator('#loading').wait_for(state='hidden')
+    page.locator('#prompt').fill('A 100x100 medieval house')
+    with page.expect_response('**/api/generate') as response:
+        page.locator('#generate').click()
+    assert response.value.status == 400
+    page.locator('#error').wait_for(state='visible')
+    assert 'width' in page.locator('#error').inner_text()
+    assert errors == [], errors
+    mobile = browser.new_page(viewport={'width': 390, 'height': 844}, device_scale_factor=1)
+    mobile.on('pageerror', lambda error: errors.append(str(error)))
+    mobile.goto(base)
+    mobile.locator('#schem:not(.disabled)').wait_for(timeout=30000)
+    assert mobile.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Mobile layout overflows horizontally'
+    mobile.screenshot(path=str(artifacts / 'workbench-mobile.png'), full_page=True)
+    assert errors == [], errors
+    browser.close()
+    print('Browser smoke passed: WebGL, cutaway, camera, 4 downloads, 3 styles, terrain toggle, errors, mobile layout.')
